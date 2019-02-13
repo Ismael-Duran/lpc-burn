@@ -1,26 +1,24 @@
-
-
-
-
-
-
-#Initial Stage
-
+#Initiate setup using while-loop
 import serial
 from serial.tools import list_ports
 import time
 
-# Send "?" to initiate synchronize communication
-SEND_SYNCRONIZE = b"?"
-
 # Commands to synchronize LPC40xx
+Set_Up_Instructions= {"Init_Com":b"?","Host_Response":b"Synchronized\r\n",
+                      "Send_Crystal_Freq":b"12000\r\n"}
+
+# Work on after
+# # ISP_Return_Code={"0":"CMD_SUCCESS","1":"Invalid_COMMAND"}
+# # LPC_Response= {"DEVICE_SYNC":b"Synchronized\r\n","DEVICE_ACK":b"Synchronized\rOK\r\n"",
+                      # "DEVICE_RESPONSE_TO_CRYSTAL_FREQ":b"12000\r\n"}
+
+# Device Responses
 DEVICE_SYNCHRONIZE_RESPONSE=b"Synchronized\r\n"
-HOST_RESPONSE=b"Synchronized\r\n"
-
 DEVICE_ACKNOLEDGE_SYNC=b"Synchronized\rOK\r\n"
-SEND_CRYSTAL_FREQUENCY=b"12000\r\n"
-
 DEVICE_RESPONSE_TO_CRYSTAL_FREQ=b"12000\rOK\r\n"
+
+init_complete=False
+fail_initiate=False
 
 # Data communication baud-rate
 baudrate=38400
@@ -36,6 +34,9 @@ ser.timeout=5
 #Boolean used in loop to clear buffer
 buffer_full=True
 
+# variable assigned ISP return code from LPC40XX
+ISP_Return_Code=""
+
 try:
         ser.open()
 
@@ -45,21 +46,22 @@ try:
         else:
                 print("NO")
 
-        # Condition is satisfied virtually press DTR & RTS
+        # Condition is satisfied, virtually press DTR & RTS
         if(ser.rts is False and ser.dtr is False):
                 ser.dtr=True
                 ser.rts=True
 
                 # Flushing out the input buffer that has
-                # data remaining
+                # data remaining when LPC40XX was initially turned on
                 while(buffer_full):
                         ser.flushInput()
                         buffer= ser.read(500)
-                        print(buffer)
                         if buffer is b"":
                                 buffer_full=False
                         else:
                                 buffer_full=True
+
+        print(buffer)
 
         # Conditioned satisfied that both DTR & RTS pressed
         # release DTR
@@ -68,50 +70,56 @@ try:
         else:   
                 print("Need to toggle dtr")
 
+        # Here we begin to send set-up commands
+        ser.write(Set_Up_Instructions["Init_Com"])
+        device_response=ser.read(50)                                                    # Read the data/response
+        print("Response:{}".format(device_response))                    # display data retrieved from input buffer
 
-        # Send "?" to LPC40xx to begin syncronization
-        ser.write(SEND_SYNCRONIZE)
-        serial_response=ser.read(50) # Read the data/response
-        print(serial_response)       # display data retrieved from input buffer
+        while not init_complete and not fail_initiate:
+                # Serial response checked
+                if device_response==DEVICE_SYNCHRONIZE_RESPONSE:
+                                ser.write(Set_Up_Instructions["Host_Response"])
+                                device_response=ser.read(50)    # Read input buffer again
+                                                                # for serial response
+                                print("Response:{}".format(device_response))
+                # LPC40XX Response to acknowledge that Host acknowledge
+                elif device_response==DEVICE_ACKNOLEDGE_SYNC:
+                                ser.write(Set_Up_Instructions["Send_Crystal_Freq"])
+                                device_response=ser.read(50)
+                                print("Response:{}".format(device_response))
+                # LPC40XX RESPONSE to acknowledge the Crystal Frequency was set
+                elif device_response==DEVICE_RESPONSE_TO_CRYSTAL_FREQ:
+                                init_complete=True                              #After device ACK crystal Freq then initiation is done
+                                print("Initiation Complete")
+                else:
+                                fail_initiate=True
+                                print("Failed Set-Up")
 
-        # Serial response checked
-        if serial_response==DEVICE_SYNCHRONIZE_RESPONSE:
-                ser.write(HOST_RESPONSE)
-                serial_response=ser.read(50) # Read input buffer again
-                                             # for serial response
-        else:
-                print("No response")
-        
-        print(serial_response)
+        if init_complete:
+                # Turn OFF Echo (Default: ON)
+                ser.write(b"A 0\r\n")
+                ISP_Return_Code=ser.read(50)
+                print(ISP_Return_Code)
 
-        # Serial Response to acknoledge that Host acknoledge
-        # WHY IS THE LPC40xx RESPONSE NOT JUST b"OK<CR><LF>",
-        # INSTEAD IT IS b"SYNCRONIZED<CR>OK<CR><LF>
-        if serial_response==DEVICE_ACKNOLEDGE_SYNC:
-                ser.write(SEND_CRYSTAL_FREQUENCY)
-                serial_response=ser.read(50)
+                # Fetch Part Identification Number
+                ser.write(b"J\r\n")
+                ser.flushInput()
+                ISP_Return_Code=ser.read(50)
+                print(ISP_Return_Code)
+                                
+                # Fetch Device Serial Number
+                ser.write(b"N\r\n")
+                ISP_Return_Code=ser.read(50)
+                print(ISP_Return_Code)
 
-        else:
-                print("NACK Crystal")
-
-        print(serial_response)
-
-        # SAME THING HERE, LPC40XX RESPONDED WITH b"12000<CR>OK<CR><LF>,
-        # INSTEAD OF b"OK<CR><LF>
-        if serial_response==DEVICE_RESPONSE_TO_CRYSTAL_FREQ:
-                print("Init. Complete")
-        else:
-                print("Failed Init.")
-                
         # Closing Port
         ser.close()
+        print("close from try...")
 
 except Exception as e:
-        #Fix this to capture error messages
-        print(e.message)
+        print(e)
 else:
     # Using Else with Try-Except will Close port
     # I believe it is used correctly here
     ser.close()
-
-
+    print("Closed..")
